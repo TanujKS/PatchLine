@@ -1,0 +1,24 @@
+{
+  "name": "patchline-worker",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "cf-typegen": "wrangler types",
+    "db:migrate": "wrangler d1 migrations apply patchline-db --remote",
+    "db:migrate:local": "wrangler d1 migrations apply patchline-db --local",
+    "db:console": "wrangler d1 execute patchline-db --remote --command",
+    "tail": "wrangler tail"
+  },
+  "dependencies": {
+    "aws4fetch": "^1.0.20",
+    "postal-mime": "^2.2.7"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.2",
+    "wrangler": "^4.83.0",
+    "@types/node": "^22.10.0"
+  }
+}

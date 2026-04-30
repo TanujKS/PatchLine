@@ -1,0 +1,95 @@
+# Patchline client-site Claude Code workflow.
+#
+# Triggered when a maintainer adds the `approve-for-claude` label to an issue
+# created by patchline-worker. Claude reads the issue body (which already
+# contains the structured request, allowed paths, attachment URLs and hard
+# constraints) and opens a PR.
+#
+# Hard rules enforced here:
+#   - Only fires on the approve-for-claude label.
+#   - Only Read/Write/Edit/Glob/Grep tools are allowed (no Bash, no shell).
+#   - Permissions are minimal (issues + pull-requests + contents).
+#   - Status labels (agent-running, pr-opened, blocked) are managed inline.
+
+name: Claude Code (approve-for-claude)
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  claude:
+    if: github.event.label.name == 'approve-for-claude'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    concurrency:
+      group: claude-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Mark issue as agent-running
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: ['agent-running'],
+            });
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          claude_args: '--allowedTools "Read,Write,Edit,Glob,Grep"'
+          # The issue body is the prompt - it includes all constraints,
+          # allowed paths, attachment URLs and the structured request.
+          prompt: |
+            You are implementing a website change request.
+
+            Read the GitHub issue below in full. Follow every constraint listed
+            in its "Constraints for the agent" section. Open exactly one pull
+            request against the default branch when done, with title prefix
+            `[client-request]` and a body that includes `Closes #${{ github.event.issue.number }}`.
+
+            Issue:
+            ${{ github.event.issue.body }}
+
+      - name: On failure, mark blocked and comment
+        if: failure() || cancelled()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: ['blocked'],
+            });
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              name: 'agent-running',
+            }).catch(() => {});
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: 'Claude Code run failed or was cancelled. See workflow logs: '
+                    + `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+                    + `/actions/runs/${context.runId}`,
+            });

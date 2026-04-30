@@ -1,0 +1,36 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Glob(**)",
+      "Grep(**)",
+      "Edit(src/content/**)",
+      "Edit(src/data/**)",
+      "Edit(src/pages/**)",
+      "Edit(public/images/**)",
+      "Edit(public/files/**)",
+      "Write(src/content/**)",
+      "Write(src/data/**)",
+      "Write(public/images/**)",
+      "Write(public/files/**)"
+    ],
+    "deny": [
+      "Edit(package.json)",
+      "Edit(package-lock.json)",
+      "Edit(pnpm-lock.yaml)",
+      "Edit(yarn.lock)",
+      "Edit(.github/**)",
+      "Edit(.claude/**)",
+      "Edit(CLAUDE.md)",
+      "Edit(wrangler.*)",
+      "Edit(vite.config.*)",
+      "Edit(.env*)",
+      "Edit(public/_redirects)",
+      "Edit(public/_headers)",
+      "Write(package.json)",
+      "Write(.github/**)",
+      "Write(.env*)",
+      "Bash(**)"
+    ]
+  }
+}

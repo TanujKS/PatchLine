@@ -1,0 +1,121 @@
+# Patchline client-site OpenAI Codex workflow.
+#
+# Triggered when a maintainer adds the `approve-for-codex` label to an issue
+# created by patchline-worker. Codex reads the issue body, edits the checkout,
+# and this workflow opens a PR if Codex produced changes.
+
+name: OpenAI Codex (approve-for-codex)
+
+on:
+  issues:
+    types: [labeled]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  codex:
+    if: github.event.label.name == 'approve-for-codex'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    concurrency:
+      group: codex-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Mark issue as agent-running
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: ['agent-running'],
+            });
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Run OpenAI Codex
+        id: codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          safety-strategy: drop-sudo
+          prompt: |
+            You are implementing a website change request.
+
+            Read the GitHub issue below in full. Follow every constraint listed
+            in its "Constraints for the agent" section. Make the smallest
+            possible diff. Do not edit dependencies, CI, deployment config,
+            secrets, .github/**, .claude/**, CLAUDE.md, package files, or
+            lockfiles. If the request is ambiguous, leave the working tree
+            unchanged and explain what clarification is needed.
+
+            Prefer structured content files when present. Use this repo's
+            CLAUDE.md / AGENTS.md and .claude/settings.json as the source of
+            truth for editable areas.
+
+            Issue:
+            ${{ github.event.issue.body }}
+
+      - name: Create pull request
+        id: cpr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: patchline/codex-issue-${{ github.event.issue.number }}
+          delete-branch: true
+          commit-message: "[client-request] Apply Codex changes for issue #${{ github.event.issue.number }}"
+          title: "[client-request] ${{ github.event.issue.title }}"
+          body: |
+            Closes #${{ github.event.issue.number }}
+
+            Implemented by OpenAI Codex from the Patchline request.
+
+            Codex final message:
+            ${{ steps.codex.outputs.final-message }}
+
+      - name: Comment if no PR was opened
+        if: steps.cpr.outputs.pull-request-number == ''
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: 'Codex completed but did not leave any file changes to open a PR. Final message:\n\n'
+                    + `${{ toJSON(steps.codex.outputs.final-message) }}`,
+            });
+
+      - name: On failure, mark blocked and comment
+        if: failure() || cancelled()
+        uses: actions/github-script@v8
+        with:
+          script: |
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: ['blocked'],
+            });
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              name: 'agent-running',
+            }).catch(() => {});
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo:  context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: 'OpenAI Codex run failed or was cancelled. See workflow logs: '
+                    + `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`
+                    + `/actions/runs/${context.runId}`,
+            });

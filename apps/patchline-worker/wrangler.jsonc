@@ -1,0 +1,107 @@
+/**
+ * Patchline agentdev worker.
+ *
+ * Single Worker that exposes:
+ *   - email()  receives mail at agentdev+{slug}@tanuj.xyz via Email Routing
+ *   - queue()  consumes patchline-jobs (normalize+issue) and patchline-jobs-dlq (admin notify)
+ *   - fetch()  receives GitHub App webhooks at POST /webhooks/github
+ *
+ * Bindings, queue tuning rationale and operational notes live in the project README.
+ * For Wrangler config docs: https://developers.cloudflare.com/workers/wrangler/configuration/
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "patchline-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-04-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "upload_source_maps": true,
+
+  /**
+   * Public URL for GitHub webhooks (and optional testing) lives on workers.dev
+   * unless you add a custom domain route. Explicit values silence Wrangler's
+   * "will be enabled by default" warnings on deploy.
+   */
+  "workers_dev": true,
+  /**
+   * Set to false if you do not use Workers Preview URLs (versioned *.workers.dev
+   * URLs per deployment). Enable if your workflow relies on them.
+   */
+  "preview_urls": true,
+
+  "observability": {
+    "enabled": true
+  },
+
+  /**
+   * Plain (non-secret) vars. Override per-environment as needed.
+   * Secrets (GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY, GITHUB_WEBHOOK_SECRET,
+   * R2_S3_ACCESS_KEY_ID, R2_S3_SECRET_ACCESS_KEY) are pushed via `wrangler secret put`.
+   */
+  "vars": {
+    "EMAIL_LOCAL_PART": "patchline",
+    "EMAIL_DOMAIN": "tanuj.xyz",
+    "NOTIFY_FROM_EMAIL": "patchline@tanuj.xyz",
+    "ADMIN_NOTIFY_EMAIL": "tanujsiripurapu@gmail.com",
+    "DLQ_NAME": "patchline-jobs-dlq",
+    "R2_ACCOUNT_ID": "REPLACE_WITH_CLOUDFLARE_ACCOUNT_ID",
+    "R2_BUCKET_NAME": "patchline-storage",
+    "PRESIGN_EXPIRY_SECONDS": "604800"
+  },
+
+  "d1_databases": [
+    {
+      "binding": "patchline_db",
+      "database_name": "patchline-db",
+      "database_id": "4b51d979-bdf1-4b54-82fa-370175d77634",
+      "migrations_dir": "migrations",
+      "remote": true
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "patchline_storage",
+      "bucket_name": "patchline-storage",
+      "remote": true
+    }
+  ],
+
+  /**
+   * Queue config:
+   *   - main consumer is tuned for human-paced traffic (1 msg per invocation, near-real-time)
+   *   - DLQ consumer is terminal: max_retries 0, just notify the admin and ack
+   *   - max_concurrency 5 absorbs forwarded bursts without hammering GitHub
+   */
+  "queues": {
+    "producers": [
+      { "binding": "patchline_jobs", "queue": "patchline-jobs" }
+    ],
+    "consumers": [
+      {
+        "queue": "patchline-jobs",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_concurrency": 5,
+        "max_retries": 3,
+        "retry_delay": 30,
+        "dead_letter_queue": "patchline-jobs-dlq"
+      },
+      {
+        "queue": "patchline-jobs-dlq",
+        "max_batch_size": 1,
+        "max_batch_timeout": 5,
+        "max_retries": 0
+      }
+    ]
+  },
+
+  /**
+   * Cloudflare send_email binding for admin notifications.
+   * Unrestricted destination = can send to any verified Email Routing destination.
+   * Tighten with "destination_address" once ADMIN_NOTIFY_EMAIL is finalized.
+   */
+  "send_email": [
+    { "name": "SEND_EMAIL" }
+  ]
+}

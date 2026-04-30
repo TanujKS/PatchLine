@@ -1,0 +1,24 @@
+# GitHub App / TLS private keys (never commit)
+*.pem
+*.key
+*private-key*
+*.p12
+*.pfx
+
+# Local env / secrets
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*
+
+# Dependencies & build
+node_modules/
+dist/
+.wrangler/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
